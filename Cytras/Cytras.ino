@@ -1,113 +1,175 @@
-// FaBo 202 9Axis MPU9250 - Version: Latest
-#include <FaBo9Axis_MPU9250.h>
-#include <Wire.h>
-
-#include<SakuraIO.h>
-
-//library for gps module
-#include <TinyGPS++.h>
 #include <SoftwareSerial.h>
+#include <SakuraIO.h>
+#include <FaBo9Axis_MPU9250.h>
 
-
-#define pinGpsRx 10 //GPS Rx (Data Out) のピン番号
-#define pinGpsTx 11 //GPS Tx (Data In) のピン番号
-
-#define Brate 9600 //シリアル通信のボーレート
-
-TinyGPSPlus gps;
-SoftwareSerial mySerial(pinGpsRx, pinGpsTx);
-//TinyGPSCustom magneticVariation(gps, "GPRMC", 10);
+SoftwareSerial mySerial(11, 10);
+float latitude_f = 36.11195;
+float longitude_f = 140.099092;
 
 FaBo9Axis fabo_9axis;
+int mpu_flag = 0;
 
-//SakuraIO_SPI sakuraio(10);
 SakuraIO_I2C sakuraio;
 
-void setup() {
-  Serial.begin(Brate);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
+// NMEAの緯度経度を「度分秒」(DMS)の文字列に変換する
+//String NMEA2DMS(float val) {
+//  int d = val / 100;
+//  int m = ((val / 100.0) - d) * 100.0;
+//  float s = ((((val / 100.0) - d) * 100.0) - m) * 60;
+//  return String(d) + "度" + String(m) + "分" + String(s, 1) + "秒";
+//}
 
-  //Serial.println("Begin");
+// (未使用)NMEAの緯度経度を「度分」(DM)の文字列に変換する
+//String NMEA2DM(float val) {
+//  int d = val / 100;
+//  float m = ((val / 100.0) - d) * 100.0;
+//  return String(d) + "度" + String(m, 4) + "分";
+//}
 
-  /* LED 13 */
-  pinMode(13, OUTPUT);
-  digitalWrite(13, HIGH);
-
-
-  // set the data rate for the SoftwareSerial port
-  mySerial.begin(9600);
-  //mySerial.println("Software Serial inited.");
-
-  // mpu9250
-  if (fabo_9axis.begin()) {
-    Serial.println("configured FaBo 9Axis I2C Brick");
-  } else {
-    Serial.println("mpu9250 error");
-    while (1);
-  }
+// NMEAの緯度経度を「度」(DD)の文字列に変換する
+String NMEA2DD(float val) {
+  int d = val / 100;
+  int m = (((val / 100.0) - d) * 100.0) / 60;
+  float s = (((((val / 100.0) - d) * 100.0) - m) * 60) / (60 * 60);
+  return String(d + m + s, 6);
 }
 
-void loop() { // run over and over
+// UTC時刻から日本の標準時刻に変換する(GMT+9:00)
+//String UTC2GMT900(String str) {
+//  int hh = (str.substring(0,2).toInt()) + 9;
+//  if(hh > 24) hh = hh - 24;
+//
+//  return String(hh,DEC) + ":" + str.substring(2,4) + ":" + str.substring(4,6);
+//}
 
-  /* accelerometer */
-  float ax, ay, az;
-  float gx, gy, gz;
-  float mx, my, mz;
-  float temp;
+void setup() {
+  mySerial.begin(9600);
+  Serial.begin(115200);
 
-  fabo_9axis.readAccelXYZ(&ax, &ay, &az);
-  fabo_9axis.readGyroXYZ(&gx, &gy, &gz);
-  fabo_9axis.readMagnetXYZ(&mx, &my, &mz);
-  //fabo_9axis.readTemperature(&temp);
+  //  /* MPU9250--------------------------*/
+  if (fabo_9axis.begin()) {
+    Serial.println("configured FaBo 9Axis I2C Brick");
+    mpu_flag = 1;
+  } else {
+    Serial.println("mpu9250 error");
+    //while (1);
+  }
+  /* ---------------------------------*/
 
+}
+void loop() {
+  //   1つのセンテンスを読み込む
+  String line = mySerial.readStringUntil('\n');
 
-  /* pressure and bend */
+  Serial.println(line);
+
+  if (line != "") {
+    int i, index = 0, len = line.length();
+    String str = "";
+
+    //     StringListの生成(簡易)
+    String list[50];
+    for (i = 0; i < 50; i++) {
+      list[i] = "";
+    }
+
+    //     「,」を区切り文字として文字列を配列にする
+    for (i = 0; i < len; i++) {
+      if (line[i] == ',') {
+        list[index++] = str;
+        str = "";
+        continue;
+      }
+      str += line[i];
+    }
+
+    //     $GPGGAセンテンスのみ読み込む
+    for (i = 0; i < index; i++) {
+      //      Serial.print("list[");
+      //      Serial.print(i);
+      //      Serial.print("] = ");
+      //      Serial.println(list[i]);
+      //if (list[i] == "$GPGGA" || list[i] == "$GP$GPGGA") {
+      if (list[i].indexOf("$GPGGA") != -1) {
+        //         ステータス
+        if (list[i + 6] != "0" && list[i + 5] == "E") {
+          //           現在時刻
+          //          Serial.print(UTC2GMT900(list[1]));
+
+          //           緯度
+          //          Serial.print(" 緯度:");
+          //          Serial.print(NMEA2DMS(list[2].toFloat()));
+          //          Serial.print("(");
+          Serial.print("latitide = ");
+          Serial.println(NMEA2DD(list[i + 2].toFloat()));
+          latitude_f = NMEA2DD(list[i + 2].toFloat()).toFloat();
+          //          Serial.print(")");
+
+          //           経度
+          //         Serial.print(" 経度:");
+          //         Serial.print(NMEA2DMS(list[4].toFloat()));
+          //         Serial.print("(");
+          Serial.print("longitude = ");
+          Serial.println(NMEA2DD(list[i + 4].toFloat()));
+          longitude_f = NMEA2DD(list[i + 4].toFloat()).toFloat();
+          //         Serial.print(")");
+
+          //          海抜
+          //          Serial.print(" 海抜:");
+          //          Serial.print(list[9]);
+          //          list[10].toLowerCase();
+          //          Serial.print(list[10]);
+          break;
+        } else {
+          Serial.println("測位できませんでした。");
+        }
+        Serial.println("");
+      }
+    }
+  }
+
+  /* pressure and bend -----------------*/
   int ain0 = analogRead(0);
   int ain1 = analogRead(1);
   int ain2 = analogRead(2);
   int ain3 = analogRead(3);
-  //int ain4 = analogRead(4);
-  //int ain5 = analogRead(5);
+  //  //int ain4 = analogRead(4);
+  //  //int ain5 = analogRead(5);
+  //
+  //  Serial.print("Pressure: ");
+  //  Serial.print(ain0); Serial.print(",");
+  //  Serial.print(ain1); Serial.print(",");
+  //  Serial.print(ain2); Serial.print(",");
+  //  Serial.println(ain3);
+  //  /* -----------------------------------*/
 
-  double latitude = 36.11195;
-  double longitude = 140.099092;
-
-  //GPSのシリアルデータの読み込み
-  while (mySerial.available() > 0) {
-    char c_gps = mySerial.read();
-    Serial.print(c_gps);
-    gps.encode(c_gps);
-
-    latitude = gps.location.lat();
-    longitude = gps.location.lng();
-
-    if (gps.location.isValid()) {
-      Serial.print("LAT="); Serial.println(gps.location.lat(), 6);
-      Serial.print("LONG="); Serial.println(gps.location.lng(), 6);
-      Serial.print("ALT="); Serial.println(gps.altitude.meters());
-      break;
+  /* accelerometer ---------------------*/
+  float ax = 0, ay = 0, az = 0;
+  float gx = 0, gy = 0, gz = 0;
+  float mx = 0, my = 0, mz = 0;
+  float temp = 0;
+  if (mpu_flag == 1) {
+    fabo_9axis.readAccelXYZ(&ax, &ay, &az);
+    fabo_9axis.readGyroXYZ(&gx, &gy, &gz);
+    fabo_9axis.readMagnetXYZ(&mx, &my, &mz);
+  } else {
+    if (fabo_9axis.begin()) {
+      Serial.println("configured FaBo 9Axis I2C Brick");
+      mpu_flag = 1;
+    } else {
+      Serial.println("mpu9250 error");
     }
   }
-
-
-  Serial.print("P:");
-  Serial.print(ain0); Serial.print(",");
-  Serial.print(ain1); Serial.print(",");
-  Serial.print(ain2); Serial.print(",");
-  Serial.println(ain3);
-
   Serial.print("xyz: ");
   Serial.print(ax);
   Serial.print(",");
   Serial.print(ay);
   Serial.print(",");
   Serial.println(az);
+  /*-----------------------------------*/
 
-
-  sakuraio.enqueueTx((uint8_t)0, (float)latitude);
-  sakuraio.enqueueTx((uint8_t)1, (float)longitude);
+  sakuraio.enqueueTx((uint8_t)0, latitude_f);
+  sakuraio.enqueueTx((uint8_t)1, longitude_f);
   sakuraio.enqueueTx((uint8_t)2, (float)ain0);
   sakuraio.enqueueTx((uint8_t)3, (float)ain1);
   sakuraio.enqueueTx((uint8_t)4, (float)ain2);
@@ -117,7 +179,5 @@ void loop() { // run over and over
   sakuraio.enqueueTx((uint8_t)8, (float)az);
   sakuraio.send();
 
-  delay(1000);
+  delay(900);
 }
-
-
